@@ -27,7 +27,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # ================= 2. AI 模型與 RAG 知識庫初始化 =================
 # 推薦使用 llama-3-70b-instruct，對中文支援佳且邏輯強
-llm = ChatNVIDIA(model="meta/llama3.1-70b-instruct", nvidia_api_key=NVIDIA_API_KEY)
+llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct", nvidia_api_key=NVIDIA_API_KEY)
 embeddings = NVIDIAEmbeddings(nvidia_api_key=NVIDIA_API_KEY)
 
 vector_store = None
