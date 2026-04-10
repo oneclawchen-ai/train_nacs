@@ -1,0 +1,9 @@
+Flask==3.0.3
+line-bot-sdk==3.11.0
+langchain==0.2.14
+langchain-community==0.2.12
+langchain-nvidia-ai-endpoints==0.1.6
+faiss-cpu==1.8.0
+pypdf==4.3.1
+docx2txt==0.8
+gunicorn==22.0.0
