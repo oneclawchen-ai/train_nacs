@@ -56,7 +56,7 @@ def initialize_rag():
             print(f"讀取檔案 {filename} 時發生錯誤: {e}")
 
     if documents:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=50)
         docs = text_splitter.split_documents(documents)
         vector_store = FAISS.from_documents(docs, embeddings)
         print("✅ 知識庫載入完成！機器人現在懂講義內容了。")
