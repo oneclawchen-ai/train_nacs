@@ -27,7 +27,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # ================= 2. AI 模型與 RAG 知識庫初始化 =================
 # 推薦使用 llama-3-70b-instruct，對中文支援佳且邏輯強
-llm = ChatNVIDIA(model="meta/llama3-70b-instruct", nvidia_api_key=NVIDIA_API_KEY)
+llm = ChatNVIDIA(model="meta/llama3-8b-instruct", nvidia_api_key=NVIDIA_API_KEY)
 embeddings = NVIDIAEmbeddings(model="nvidia/nv-embedqa-e5-v5", nvidia_api_key=NVIDIA_API_KEY)
 
 vector_store = None
@@ -67,7 +67,7 @@ initialize_rag()
 
 # ================= 3. 設定學長人設與提示詞 (Prompt) =================
 system_prompt = (
-    "你是一位在國家文官學院服務的貼心學長，請用親切、鼓勵且具備建設性的口吻，提供同學課業上的解決方案與建議。\n"
+    "你是一位在國家文官學院服務的貼心學長，請用親切、鼓勵且具備建設性的口吻，提供同學課業上的解決方案與建議，也會講笑話幫大家紓解壓力。\n"
     "【最高指令】：請務必、絕對要使用「繁體中文 (Traditional Chinese, zh-TW)」進行回覆，不管問題是什麼，都嚴禁使用簡體中文或其他語言。\n\n"
     "請優先根據以下提供的參考資料(Context)來回答問題。如果參考資料中沒有相關資訊，請用你豐富的常識回答，但務必保持溫暖的學長人設。\n\n"
     "【參考資料】：\n{context}\n\n"
