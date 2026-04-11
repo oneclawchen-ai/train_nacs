@@ -1,4 +1,7 @@
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz # 用來設定台灣時區
+from langchain_core.messages import HumanMessage # 用來呼叫 LLM
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -15,6 +18,45 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
 app = Flask(__name__)
+
+# ---------------------------------------------------------
+# 每日早安廣播排程設定
+# ---------------------------------------------------------
+def send_morning_greeting():
+    try:
+        # 1. 請 AI 學長動態生成今天的早安語
+        prompt = """
+        請以「貼心、幽默的文官學院學長」身分，寫一段約 50~100 字的早安勉勵語。
+        對象是正在受訓的文官學員。
+        要求：
+        1. 語氣要輕鬆、溫暖、充滿希望。
+        2. 內容可以鼓勵他們面對今天的課程、專題壓力，或是簡單關心天氣。
+        3. 每天的內容都要有新鮮感。
+        4. 請加上適當的 Emoji 圖案來點綴。
+        5. 不要出現「我是 AI」等字眼，要完全融入學長角色。
+        """
+        
+        # 呼叫我們之前設定好的 NVIDIA LLM
+        response = llm.invoke([HumanMessage(content=prompt)])
+        greeting_text = response.content.strip()
+        
+        # 2. 透過 LINE API 廣播給所有加好友的同學
+        from linebot.models import TextSendMessage
+        line_bot_api.broadcast(TextSendMessage(text=greeting_text))
+        
+        print(f"✅ 早安廣播已成功發送：{greeting_text}")
+        
+    except Exception as e:
+        print(f"❌ 早安廣播發送失敗：{e}")
+
+# 建立背景排程器，並設定為台灣時區 (Asia/Taipei)
+scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Taipei'))
+
+# 設定每天早上 08:00 執行 `send_morning_greeting` 函式
+scheduler.add_job(send_morning_greeting, 'cron', hour=8, minute=0)
+
+# 啟動排程器
+scheduler.start()
 
 # ================= 1. 環境變數設定 =================
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
