@@ -59,7 +59,7 @@ def send_morning_greeting():
 scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Taipei'))
 
 # 設定每天早上 08:00 執行 `send_morning_greeting` 函式
-scheduler.add_job(send_morning_greeting, 'cron', hour=9, minute=45)
+scheduler.add_job(send_morning_greeting, 'cron', hour=7, minute=35)
 
 # 啟動排程器
 scheduler.start()
