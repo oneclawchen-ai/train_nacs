@@ -26,7 +26,7 @@ def send_morning_greeting():
     try:
         # 1. 請 AI 學長動態生成今天的早安語
         prompt = """
-        請以「貼心、幽默的文官學院學長」身分，寫一段約 50~100 字的早安勉勵語。
+        請以「貼心、幽默的文官學院學長」身分，寫一段約 50~100 字的早安勉勵語(包含中英文)。
         對象是正在受訓的文官學員。
         要求：
         1. 語氣要輕鬆、溫暖、充滿希望。
@@ -40,15 +40,21 @@ def send_morning_greeting():
         response = llm.invoke([HumanMessage(content=prompt)])
         greeting_text = response.content.strip()
         
-        # 2. 透過 LINE API 廣播給所有加好友的同學
-        from linebot.models import TextSendMessage
-        line_bot_api.broadcast(TextSendMessage(text=greeting_text))
+        # 2. 透過 LINE API (v3版本) 廣播給所有加好友的同學
+        from linebot.v3.messaging import BroadcastRequest, TextMessage
         
-        print(f"✅ 早安廣播已成功發送：{greeting_text}")
+        # 必須在這裡重新建立連線才能發送
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            broadcast_request = BroadcastRequest(
+                messages=[TextMessage(text=greeting_text)]
+            )
+            line_bot_api.broadcast(broadcast_request)
+        
+        print(f"✅ 早安廣播已成功發送：\n{greeting_text}")
         
     except Exception as e:
         print(f"❌ 早安廣播發送失敗：{e}")
-
 # 建立背景排程器，並設定為台灣時區 (Asia/Taipei)
 scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Taipei'))
 
