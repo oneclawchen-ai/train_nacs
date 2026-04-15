@@ -24,7 +24,6 @@ app = Flask(__name__)
 # ---------------------------------------------------------
 def send_morning_greeting():
     try:
-        # 1. 請 AI 學長動態生成今天的早安語
         prompt = """
         請以「貼心、幽默的文官學院學長學姊」身分，請務必、絕對要使用「繁體中文 (Traditional Chinese, zh-TW)」撰寫，寫一段約 10~50 字的早安勉勵語(包含中英文)。
         對象是正在受訓的文官學員。
@@ -36,33 +35,21 @@ def send_morning_greeting():
         5. 不要出現「我是 AI」等字眼，要完全融入學長學姊角色。
         6. 不定時會送出勉勵的話，用中英文來送出勉勵的話。
         """
-        
-        # 呼叫我們之前設定好的 NVIDIA LLM
         response = llm.invoke([HumanMessage(content=prompt)])
         greeting_text = response.content.strip()
         
-        # 2. 透過 LINE API (v3版本) 廣播給所有加好友的同學
         from linebot.v3.messaging import BroadcastRequest, TextMessage
-        
-        # 必須在這裡重新建立連線才能發送
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            broadcast_request = BroadcastRequest(
-                messages=[TextMessage(text=greeting_text)]
-            )
+            broadcast_request = BroadcastRequest(messages=[TextMessage(text=greeting_text)])
             line_bot_api.broadcast(broadcast_request)
         
         print(f"✅ 早安廣播已成功發送：\n{greeting_text}")
-        
     except Exception as e:
         print(f"❌ 早安廣播發送失敗：{e}")
-# 建立背景排程器，並設定為台灣時區 (Asia/Taipei)
+
 scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Taipei'))
-
-# 設定每天早上 08:00 執行 `send_morning_greeting` 函式
 scheduler.add_job(send_morning_greeting, 'cron', hour=7, minute=35)
-
-# 啟動排程器
 scheduler.start()
 
 # ================= 1. 環境變數設定 =================
@@ -70,47 +57,57 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY')
 
-# 初始化 LINE Bot API
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # ================= 2. AI 模型與 RAG 知識庫初始化 =================
-# 推薦使用 llama-3-70b-instruct，對中文支援佳且邏輯強
-llm = ChatNVIDIA(model="openai/gpt-oss-20b", nvidia_api_key=NVIDIA_API_KEY,temperature=0.2,top_p=0.7)
+# ⚠️ 將模型改回穩定的 NVIDIA 官方端點名稱，以免發生閃退
+llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct", nvidia_api_key=NVIDIA_API_KEY, temperature=0.2, top_p=0.7)
 embeddings = NVIDIAEmbeddings(model="nvidia/nv-embedqa-e5-v5", nvidia_api_key=NVIDIA_API_KEY)
 
 vector_store = None
 
 def initialize_rag():
-    """啟動時讀取 data 資料夾內的檔案，並建立向量資料庫"""
     global vector_store
     data_dir = "./data"
     
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-        print("已建立 data 資料夾，請將 PDF/Word 講義放入此處。")
+        print("\n⚠️ [警告] 找不到 data 資料夾，已自動建立！(這代表 Render 雲端上目前沒有講義)")
         return
 
     documents = []
+    files_count = 0
+    
+    print("\n📂 開始掃描 data 資料夾中的講義檔案...")
     for filename in os.listdir(data_dir):
         filepath = os.path.join(data_dir, filename)
+        ext = filename.lower() # 防呆機制：確保 .PDF 也能讀取
         try:
-            if filename.endswith(".pdf"):
+            if ext.endswith(".pdf"):
                 loader = PyPDFLoader(filepath)
                 documents.extend(loader.load())
-            elif filename.endswith(".docx"):
+                files_count += 1
+                print(f"  - 成功讀取: {filename}")
+            elif ext.endswith(".docx"):
                 loader = Docx2txtLoader(filepath)
                 documents.extend(loader.load())
+                files_count += 1
+                print(f"  - 成功讀取: {filename}")
         except Exception as e:
-            print(f"讀取檔案 {filename} 時發生錯誤: {e}")
+            print(f"❌ 讀取檔案 {filename} 時發生錯誤: {e}")
+
+    if files_count == 0:
+        print("⚠️ [警告] data 資料夾是空的，沒有發現任何 PDF 或 Word 檔案！")
 
     if documents:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=50)
+        # 【優化】加大 chunk_size 到 600，讓 AI 看到的上下文更完整，避免斷章取義
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
         docs = text_splitter.split_documents(documents)
         vector_store = FAISS.from_documents(docs, embeddings)
-        print("✅ 知識庫載入完成！機器人現在懂講義內容了。")
+        print(f"✅ 知識庫載入完成！共讀取 {files_count} 個檔案，切成了 {len(docs)} 個知識區塊。\n")
     else:
-        print("⚠️ 警告：data 資料夾中沒有文件，機器人將以純對話模式啟動（無 RAG）。")
+        print("⚠️ [警告] 機器人將以純對話模式啟動（無 RAG 輔助）。\n")
 
 initialize_rag()
 
@@ -130,15 +127,33 @@ prompt_template = ChatPromptTemplate.from_messages([
 ])
 
 def get_ai_response(user_input):
-    """處理使用者輸入並生成 AI 回覆"""
     document_chain = create_stuff_documents_chain(llm, prompt_template)
     
     if vector_store:
-        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        # 【優化】讓檢索器找最相關的 4 塊資料 (k=4)
+        retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+        
+        # --- 【新增日誌探照燈】將 RAG 抓到的資料印在 Render 的 Logs 讓我們看 ---
+        try:
+            retrieved_docs = retriever.invoke(user_input)
+            print(f"\n🔍 [RAG 檢索測試] 同學提問：「{user_input}」")
+            if not retrieved_docs:
+                print("   ⚠️ 糟糕！知識庫裡完全找不到相關內容。")
+            else:
+                print(f"   📦 RAG 共抓出 {len(retrieved_docs)} 塊資料餵給 AI：")
+                for i, doc in enumerate(retrieved_docs):
+                    source = doc.metadata.get('source', '未知檔案')
+                    print(f"   📄 [來源 {i+1} : {os.path.basename(source)}] 預覽: {doc.page_content[:60]}...")
+            print("-" * 50)
+        except Exception as e:
+            print(f"❌ 檢索過程發生錯誤: {e}")
+        # ---------------------------------------------------------
+        
         retrieval_chain = create_retrieval_chain(retriever, document_chain)
         response = retrieval_chain.invoke({"input": user_input})
         return response["answer"]
     else:
+        print(f"⚠️ [無知識庫模式] 同學提問：「{user_input}」")
         response = document_chain.invoke({"input": user_input, "context": []})
         return response
 
@@ -158,28 +173,19 @@ def callback():
 def handle_message(event):
     user_message = event.message.text
     
-    # ---------------------------------------------------------
-    # 【新增功能：關鍵字防洗版機制】
-    # 判斷訊息中是否包含「文官助理」
     if "文官助理" not in user_message:
-        # 如果沒有關鍵字，直接結束函式，機器人不會已讀也不會回覆
         return
         
-    # 如果有關鍵字，把「文官助理」這四個字清掉，以免干擾 AI 判斷問題
     clean_message = user_message.replace("文官助理", "").strip()
     
-    # 如果同學只打了「文官助理」卻沒問問題，給予預設的引導對話
     if not clean_message:
          clean_message = "請用學長姐的人設簡短打個招呼，並問我有什麼需要幫忙的？"
-    # ---------------------------------------------------------
 
     try:
-        # 呼叫大腦處理文字 (傳入過濾後的乾淨訊息)
         ai_reply = get_ai_response(clean_message)
     except Exception as e:
         ai_reply = f"不好意思同學，學長姐的大腦暫時連不上線啦 (系統錯誤: {str(e)})，請稍後再試！"
 
-    # 將結果回傳給 LINE 使用者
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message_with_http_info(
@@ -192,7 +198,7 @@ def handle_message(event):
 @app.route("/", methods=['GET'])
 def hello():
     return "Hello, the bot is running!"
-# ================= 5. 啟動伺服器 =================
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
