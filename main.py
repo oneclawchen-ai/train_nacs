@@ -169,23 +169,41 @@ def callback():
         abort(400)
     return 'OK'
 
+# ================= 4. LINE Webhook 路由設定 =================
+# (原本的 /callback 路由保留在上面)
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_message = event.message.text
     
+    # 判斷訊息中是否包含「文官助理」
     if "文官助理" not in user_message:
+        # 如果沒有關鍵字，直接結束函式，機器人不會已讀也不會回覆
         return
         
+    # 如果有關鍵字，把「文官助理」這四個字清掉，以免干擾 AI 判斷問題
     clean_message = user_message.replace("文官助理", "").strip()
     
+    # 如果同學只打了「文官助理」卻沒問問題，給予預設的引導對話
     if not clean_message:
-         clean_message = "請用學長姐的人設簡短打個招呼，並問我有什麼需要幫忙的？"
+         clean_message = "請用學長的人設簡短打個招呼，並問我有什麼需要幫忙的？"
 
     try:
+        # 呼叫大腦處理文字
         ai_reply = get_ai_response(clean_message)
+        
+        # ---------------------------------------------------------
+        # 🧹 【字串淨水器】：過濾掉 AI 喜歡加的 Markdown 符號
+        # 把 "###" 和 "**" 替換成空字串 (也就是刪除)
+        ai_reply = ai_reply.replace("###", "")
+        ai_reply = ai_reply.replace("**", "")
+        ai_reply = ai_reply.strip()
+        # ---------------------------------------------------------
+        
     except Exception as e:
-        ai_reply = f"不好意思同學，學長姐的大腦暫時連不上線啦 (系統錯誤: {str(e)})，請稍後再試！"
+        ai_reply = f"不好意思同學，學長的大腦暫時連不上線啦 (系統錯誤: {str(e)})，請稍後再試！"
 
+    # 將結果回傳給 LINE 使用者
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message_with_http_info(
