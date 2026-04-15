@@ -63,7 +63,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # ================= 2. AI 模型與 RAG 知識庫初始化 =================
 # ⚠️ 將模型改回穩定的 NVIDIA 官方端點名稱，以免發生閃退
 llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct", nvidia_api_key=NVIDIA_API_KEY, temperature=0.2, top_p=0.7)
-embeddings = NVIDIAEmbeddings(model="nvidia/nv-embedqa-e5-v5", nvidia_api_key=NVIDIA_API_KEY)
+embeddings = NVIDIAEmbeddings(model="nvidia/nv-embedqa-e5-v5", nvidia_api_key=NVIDIA_API_KEY,truncate="END")
 
 vector_store = None
 
@@ -101,8 +101,8 @@ def initialize_rag():
         print("⚠️ [警告] data 資料夾是空的，沒有發現任何 PDF 或 Word 檔案！")
 
     if documents:
-        # 【優化】加大 chunk_size 到 600，讓 AI 看到的上下文更完整，避免斷章取義
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
+        # 【優化】加大 chunk_size 到 150，讓 AI 看到的上下文更完整，避免斷章取義
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=150, chunk_overlap=20)
         docs = text_splitter.split_documents(documents)
         vector_store = FAISS.from_documents(docs, embeddings)
         print(f"✅ 知識庫載入完成！共讀取 {files_count} 個檔案，切成了 {len(docs)} 個知識區塊。\n")
