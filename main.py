@@ -62,7 +62,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # ================= 2. AI 模型與 RAG 知識庫初始化 =================
 # ⚠️ 將模型改回穩定的 NVIDIA 官方端點名稱，以免發生閃退
-llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct", nvidia_api_key=NVIDIA_API_KEY, temperature=0.2, top_p=0.7)
+llm = ChatNVIDIA(model="openai/gpt-oss-20b", nvidia_api_key=NVIDIA_API_KEY, temperature=0.2, top_p=0.7)
 embeddings = NVIDIAEmbeddings(model="nvidia/nv-embedqa-e5-v5", nvidia_api_key=NVIDIA_API_KEY,truncate="END")
 
 vector_store = None
