@@ -5,6 +5,7 @@
 import logging
 import os
 import time
+import requests
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -42,10 +43,17 @@ def require_env(name):
 configuration = Configuration(access_token=require_env("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(require_env("LINE_CHANNEL_SECRET"))
 nvidia_key = require_env("NVIDIA_API_KEY")
+LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "45"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
+if LLM_TIMEOUT_SECONDS <= 0 or not 128 <= LLM_MAX_TOKENS <= 4096:
+    raise RuntimeError("LLM_TIMEOUT_SECONDS 必須大於 0；LLM_MAX_TOKENS 必須介於 128 與 4096")
 llm = ChatNVIDIA(
-    model="openai/gpt-oss-20b", nvidia_api_key=nvidia_key,
-    temperature=0.2, top_p=0.7, max_tokens=4096,
+    model=LLM_MODEL, nvidia_api_key=nvidia_key,
+    temperature=0.2, max_tokens=LLM_MAX_TOKENS, timeout=LLM_TIMEOUT_SECONDS,
 )
+log.info("APP_VERSION=2 LLM_CONFIG model=%s timeout_seconds=%s max_tokens=%s",
+         LLM_MODEL, LLM_TIMEOUT_SECONDS, LLM_MAX_TOKENS)
 embeddings = NVIDIAEmbeddings(
     model="nvidia/nemotron-3-embed-1b", nvidia_api_key=nvidia_key,
     truncate="END", max_batch_size=16,
@@ -128,6 +136,79 @@ def target_for(source):
     return getattr(source, attr, None) if attr else None
 
 
+def invoke_llm(messages, diagnostic=False):
+    """設定 SDK 的網路逾時；不將它誤認為整項任務的硬性總時限。"""
+    started = time.monotonic()
+    kwargs = {}
+    if LLM_MODEL.startswith("openai/gpt-oss-"):
+        kwargs["reasoning_effort"] = "low"
+    if diagnostic:
+        kwargs["max_tokens"] = 512
+    log.info("LLM_START model=%s diagnostic=%s", LLM_MODEL, diagnostic)
+    try:
+        result = llm.invoke(messages, **kwargs)
+    except Exception as error:
+        log.error("LLM_FAILED model=%s seconds=%.1f error_type=%s",
+                  LLM_MODEL, time.monotonic() - started, type(error).__name__)
+        raise
+    metadata = getattr(result, "response_metadata", {}) or {}
+    log.info("LLM_DONE model=%s seconds=%.1f finish_reason=%s", LLM_MODEL,
+             time.monotonic() - started, metadata.get("finish_reason"))
+    return result
+
+
+def nvidia_api_test():
+    """略過 LangChain、Embedding 及 RAG，直接檢查 NVIDIA HTTP 回應。"""
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": "請只用繁體中文回答：連線成功。"}],
+        "max_tokens": 512,
+        "stream": False,
+    }
+    if LLM_MODEL.startswith("openai/gpt-oss-"):
+        payload["reasoning_effort"] = "low"
+    started = time.monotonic()
+    log.info("NVIDIA_HTTP_START model=%s", LLM_MODEL)
+    try:
+        with requests.post(
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            headers={"Authorization": "Bearer " + nvidia_key,
+                     "Accept": "application/json"},
+            json=payload, timeout=(5, 20), allow_redirects=False,
+        ) as response:
+            status = response.status_code
+            log.info("NVIDIA_HTTP_STATUS status=%s seconds=%.1f request_id=%s", status,
+                     time.monotonic() - started, response.headers.get("NVCF-REQID", "-"))
+            if status == 202:
+                return "NVIDIA API 測試：HTTP 202。服務已接受請求，但答案尚未完成；本次測試不輪詢等待。"
+            if status in (401, 403):
+                return f"NVIDIA API 測試：HTTP {status}。請檢查 NVIDIA API 金鑰及此模型的存取權限。"
+            if status == 429:
+                return "NVIDIA API 測試：HTTP 429。請檢查 NVIDIA 請求速率或帳號用量限制。"
+            if status != 200:
+                return f"NVIDIA API 測試：HTTP {status}。請記下此狀態碼，供管理人員查核。"
+            data = response.json()
+            choices = data.get("choices") or []
+            if not choices:
+                return "NVIDIA API 已回應 HTTP 200，但沒有 choices，請管理人員檢查回應格式。"
+            answer = plain_content((choices[0].get("message") or {}).get("content"))
+            finish_reason = choices[0].get("finish_reason")
+            log.info("NVIDIA_HTTP_DONE finish_reason=%s has_final_text=%s", finish_reason,
+                     bool(answer))
+            if not answer:
+                return "NVIDIA API 已回應 HTTP 200，但沒有最終回答文字；可能需要調整推理或輸出 token 預算，請查閱日誌。"
+            return "✅ NVIDIA 直接 API 測試成功。\n" + answer
+    except requests.exceptions.Timeout:
+        log.warning("NVIDIA_HTTP_TIMEOUT seconds=%.1f", time.monotonic() - started)
+        return "NVIDIA 直接 API 測試逾時，尚未取得完整回應；可能是模型服務等待或連線問題。LINE 推送會在本次測試返回後進行。"
+    except requests.exceptions.RequestException:
+        log.exception("NVIDIA_HTTP_CONNECTION_FAILED")
+        return "NVIDIA API 連線失敗，請管理人員檢查主機網路及日誌。"
+    except (ValueError, TypeError, AttributeError):
+        log.exception("NVIDIA_HTTP_BAD_RESPONSE")
+        return "NVIDIA 已回應，但格式無法解析，請管理人員查閱日誌。"
+
+
 def initialize_rag():
     global vector_store, is_rag_initialized
     with rag_lock:
@@ -178,12 +259,10 @@ def get_ai_response(question, ai_test=False):
             context = "\n\n".join(d.page_content for d in docs) or context
             log.info("RETRIEVE_DONE documents=%d", len(docs))
         messages = prompt.invoke({"context": context, "input": question})
-    log.info("LLM_START")
-    result = llm.invoke(messages)
+    result = invoke_llm(messages, diagnostic=ai_test)
     text = plain_content(result.content)
     if not text:
         raise RuntimeError("LLM 回傳空白最終答案；請檢查模型回應與輸出 token 限制")
-    log.info("LLM_DONE")
     if not ai_test and REMINDER not in text:
         text += "\n\n" + REMINDER
     return text
@@ -194,9 +273,14 @@ def process_question(target, question, event_id):
     try:
         if question == "推送測試":
             answer = "✅ LINE 推送成功。本次未呼叫 NVIDIA 或知識庫。"
+        elif question.upper() == "API測試":
+            answer = nvidia_api_test()
         else:
             try:
                 answer = get_ai_response(question, ai_test=(question.upper() == "AI測試"))
+            except (requests.exceptions.Timeout, TimeoutError):
+                log.exception("AI_TIMEOUT event=%s", event_id)
+                answer = "不好意思同學，AI 服務等待逾時，這次尚未取得答案。請稍後重試；課業規範也可先洽輔導員。祝學習順利！"
             except Exception:
                 log.exception("AI_FAILED event=%s", event_id)
                 answer = "不好意思同學，目前 AI 或知識庫暫時無法查詢，請稍後再試；課業資訊也可先洽輔導員。祝學習順利！"
@@ -292,7 +376,7 @@ def health():
 
 def send_morning_greeting():
     try:
-        response = llm.invoke([
+        response = invoke_llm([
             ("system", "你是溫暖幽默的文官學院學長姊。"),
             ("human", "請給受訓同學一句 10 至 50 字的早安勉勵，繁體中文為主，附一句簡短英文及 Emoji。只輸出勉勵內容。"),
         ])
@@ -322,4 +406,3 @@ if os.environ.get("ENABLE_MORNING_BROADCAST", "false").lower() == "true":
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")),
             debug=False, use_reloader=False)
-    app.run(host="0.0.0.0", port=port)
