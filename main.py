@@ -338,7 +338,7 @@ def handle_message(event):
             log.exception("LINE_REPLY_FAILED event=%s", event_id)
         return
     try:
-        reply_text(event.reply_token, "收到囉！學長姊正在查詢，完成後會在這裡回覆您，請稍候。")
+        reply_text(event.reply_token, "收到囉！文官助理正在查詢，完成後會在這裡回覆您，請稍候。")
         log.info("LINE_ACK_OK event=%s", event_id)
     except Exception:
         # 確認訊息失敗仍可嘗試背景推送，兩條發送路徑分開記錄。
