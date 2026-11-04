@@ -70,7 +70,7 @@ REMINDER = (
     "⚠️ 溫馨提醒：以上內容為 AI 生成，僅供參考，實際課業規範與考試資訊，"
     "請務必以文官學院官方最新公告為準喔！"
 )
-SYSTEM_PROMPT = """你是親切、溫暖的文官學院學長姊，協助受訓同學。
+SYSTEM_PROMPT = """你是親切、溫暖的文官學院助理，協助受訓同學。
 一律使用繁體中文，採純文字與條列式，不使用 Markdown 表格或標記。
 一般打招呼、勉勵及笑話可以自然回應。涉及課業規範、課程、考試及行政資訊，
 只能依下方參考資料回答；沒有足夠資料時請同學洽輔導員，不可猜測。
@@ -103,7 +103,7 @@ def line_text(text):
     """保守限制在 4500 個 UTF-16 code units，包含截斷提示。"""
     text = str(text).replace("###", "").replace("**", "").strip()
     if not text:
-        text = "學長姊暫時沒有取得完整答案，請稍後再試喔。"
+        text = "文官助理暫時沒有取得完整答案，請稍後再試喔。"
     raw = text.encode("utf-16-le")
     if len(raw) > 9000:
         suffix = "\n（內容較長，請縮小問題範圍後再問喔。）"
@@ -377,7 +377,7 @@ def health():
 def send_morning_greeting():
     try:
         response = invoke_llm([
-            ("system", "你是溫暖幽默的文官學院學長姊。"),
+            ("system", "你是溫暖幽默的文官學院助理。"),
             ("human", "請給受訓同學一句 10 至 50 字的早安勉勵，繁體中文為主，附一句簡短英文及 Emoji。只輸出勉勵內容。"),
         ])
         text = plain_content(response.content)
