@@ -43,7 +43,7 @@ def require_env(name):
 configuration = Configuration(access_token=require_env("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(require_env("LINE_CHANNEL_SECRET"))
 nvidia_key = require_env("NVIDIA_API_KEY")
-LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
+LLM_MODEL = os.environ.get("LLM_MODEL", "nvidia/nemotron-3.5-bolt-e4b")
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "45"))
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
 if LLM_TIMEOUT_SECONDS <= 0 or not 128 <= LLM_MAX_TOKENS <= 4096:
