@@ -103,7 +103,7 @@ def line_text(text):
     """保守限制在 4500 個 UTF-16 code units，包含截斷提示。"""
     text = str(text).replace("###", "").replace("**", "").strip()
     if not text:
-        text = "文官助理暫時沒有取得完整答案，請稍後再試喔。"
+        text = "💬 文官助理暫時沒有取得完整答案，請稍後再試喔。"
     raw = text.encode("utf-16-le")
     if len(raw) > 9000:
         suffix = "\n（內容較長，請縮小問題範圍後再問喔。）"
@@ -263,8 +263,10 @@ def get_ai_response(question, ai_test=False):
     text = plain_content(result.content)
     if not text:
         raise RuntimeError("LLM 回傳空白最終答案；請檢查模型回應與輸出 token 限制")
-    if not ai_test and REMINDER not in text:
-        text += "\n\n" + REMINDER
+    if not ai_test:
+        text = "📚 " + text
+        if REMINDER not in text:
+            text += "\n\n" + REMINDER
     return text
 
 
@@ -280,10 +282,10 @@ def process_question(target, question, event_id):
                 answer = get_ai_response(question, ai_test=(question.upper() == "AI測試"))
             except (requests.exceptions.Timeout, TimeoutError):
                 log.exception("AI_TIMEOUT event=%s", event_id)
-                answer = "不好意思同學，AI 服務等待逾時，這次尚未取得答案。請稍後重試；課業規範也可先洽輔導員。祝學習順利！"
+                answer = "⏱️ 不好意思同學，AI 服務等待逾時，這次尚未取得答案。請稍後重試；課業規範也可先洽輔導員。祝學習順利！"
             except Exception:
                 log.exception("AI_FAILED event=%s", event_id)
-                answer = "不好意思同學，目前 AI 或知識庫暫時無法查詢，請稍後再試；課業資訊也可先洽輔導員。祝學習順利！"
+                answer = "💬 不好意思同學，目前 AI 或知識庫暫時無法查詢，請稍後再試；課業資訊也可先洽輔導員。祝學習順利！"
         try:
             push_text(target, answer)
             log.info("LINE_PUSH_OK event=%s seconds=%.1f", event_id,
@@ -333,12 +335,12 @@ def handle_message(event):
         slots.release()
         log.error("LINE_TARGET_MISSING event=%s", event_id)
         try:
-            reply_text(event.reply_token, "目前無法取得聊天室識別，請重新開啟聊天室後再試。")
+            reply_text(event.reply_token, "💬 目前無法取得聊天室識別，請重新開啟聊天室後再試。")
         except Exception:
             log.exception("LINE_REPLY_FAILED event=%s", event_id)
         return
     try:
-        reply_text(event.reply_token, "收到囉！文官助理正在查詢，完成後會在這裡回覆您，請稍候。")
+        reply_text(event.reply_token, "😊 收到囉！文官助理正在查詢，完成後會在這裡回覆您，請稍候。")
         log.info("LINE_ACK_OK event=%s", event_id)
     except Exception:
         # 確認訊息失敗仍可嘗試背景推送，兩條發送路徑分開記錄。
@@ -378,11 +380,16 @@ def send_morning_greeting():
     try:
         response = invoke_llm([
             ("system", "你是溫暖幽默的文官學院助理。"),
-            ("human", "請給受訓同學一句 10 至 50 字的早安勉勵，繁體中文為主，附一句簡短英文及 Emoji。只輸出勉勵內容。"),
+            ("human", "請給受訓同學一句 10 至 50 字的學習勉勵，繁體中文為主，附一句簡短英文。只輸出勉勵內容，早安問候與 emoji 由程式加上。"),
         ])
-        text = plain_content(response.content)
-        if not text:
-            raise RuntimeError("早安內容為空")
+        encouragement = plain_content(response.content)
+    except Exception:
+        log.warning("MORNING_AI_FAILED_USING_FALLBACK", exc_info=True)
+        encouragement = ""
+    if not encouragement:
+        encouragement = "今天先做好一件小事，累積起來就是進步。\nOne step at a time."
+    text = "☀️ 同學們早安！\n" + encouragement + " 💪"
+    try:
         with ApiClient(configuration) as client:
             MessagingApi(client).broadcast(
                 BroadcastRequest(messages=[TextMessage(text=line_text(text))]),
@@ -393,9 +400,9 @@ def send_morning_greeting():
         log.exception("MORNING_BROADCAST_FAILED")
 
 
-# 除錯期間預設關閉廣播；明確設為 true 後，恢復原本台灣時間 07:35 的廣播。
+# 台灣時間每天 07:35 廣播；需要暫停時可將 ENABLE_MORNING_BROADCAST 設為 false。
 scheduler = None
-if os.environ.get("ENABLE_MORNING_BROADCAST", "false").lower() == "true":
+if os.environ.get("ENABLE_MORNING_BROADCAST", "true").strip().lower() == "true":
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler(timezone="Asia/Taipei")
     scheduler.add_job(send_morning_greeting, "cron", hour=7, minute=35,
