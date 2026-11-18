@@ -439,7 +439,7 @@ if os.environ.get("ENABLE_MORNING_BROADCAST", "true").strip().lower() == "true":
     else:
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler(timezone="Asia/Taipei")
-        scheduler.add_job(send_morning_greeting, "cron", day_of_week="mon-fri", hour=8, minute=0,
+        scheduler.add_job(send_morning_greeting, "cron", day_of_week="mon-fri", hour=9, minute=10,
                           args=(morning_group_id, scheduler.timezone),
                           max_instances=1, coalesce=True)
         scheduler.start()
