@@ -321,6 +321,10 @@ def handle_message(event):
             seen.popitem(last=False)
     if question == "測試":
         try:
+            if event.source.type == "group":
+                group_id = target_for(event.source)
+                if group_id:
+                    log.info("LINE_MORNING_GROUP_ID=%s", group_id)
             reply_text(event.reply_token, "✅ 文官助理已收到訊息，LINE 回覆功能正常！")
             log.info("LINE_REPLY_OK event=%s", event_id)
         except Exception:
