@@ -8,6 +8,7 @@ import time
 import requests
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
 
@@ -15,7 +16,7 @@ from flask import Flask, abort, request
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    ApiClient, BroadcastRequest, Configuration, MessagingApi,
+    ApiClient, Configuration, MessagingApi,
     PushMessageRequest, ReplyMessageRequest, TextMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
@@ -376,38 +377,68 @@ def health():
     return "文官助理服務運作中", 200
 
 
-def send_morning_greeting():
+MORNING_ENCOURAGEMENTS = (
+    "先寫下一件今天想完成的事，從最小的一步開始。\nStart with one small step.",
+    "把昨天的疑問帶到今天的課堂，問清楚就又前進一步。\nKeep asking questions.",
+    "挑一個今天學到的觀念，用自己的話說一遍。\nExplain it in your own words.",
+    "和同學交換一個小發現，說不定能找到更好的做法。\nShare what you learn.",
+    "回想這週哪件事情比以前更上手，給自己一點掌聲。\nCelebrate your progress.",
+    "給今天留一點專注時間，先把最重要的練習做完。\nMake time to focus.",
+    "遇到不熟的題目時，先列出自己已經知道的線索。\nStart with what you know.",
+    "把一道難題拆成兩個小問題，一個一個解開。\nBreak it down.",
+    "試著用工作上的例子，連結今天學到的方法。\nPut learning into practice.",
+    "記下一個這週學到、下週想繼續用的方法。\nCarry one idea forward.",
+    "今天試一個新的做法，看看哪一步讓你更容易上手。\nTry one new approach.",
+    "把容易忘記的重點寫成一句話，晚一點再回想一次。\nRecall one key idea.",
+    "重做一個曾經卡住的練習，看看這次能走到哪裡。\nGive it another try.",
+    "聽聽同學怎麼解同一題，一起找出各自做法的優點。\nLearn from each other.",
+    "整理一個還想弄懂的問題，留給下週接著探索。\nStay curious.",
+    "把一個大目標換成今天做得到的小練習。\nMake your goal actionable.",
+    "留意今天哪個觀念讓你有「原來如此」的感覺。\nNotice what clicks.",
+    "卡住時先休息一下，回來再用另一種方式看題。\nPause, then try again.",
+    "把一個實用的小技巧教給同學，順便加深自己的印象。\nTeach one useful tip.",
+    "替本週的努力寫一句肯定，再帶著這份心得迎接下週。\nGive yourself credit.",
+)
+
+
+def send_morning_greeting(group_id, local_timezone):
+    today = datetime.now(local_timezone).date()
+    # 週末不排程，輪替索引只計算週一到週五。
+    week, weekday = divmod(today.toordinal() - 1, 7)
+    fallback = MORNING_ENCOURAGEMENTS[(week * 5 + weekday) % len(MORNING_ENCOURAGEMENTS)]
+    daily_idea = fallback.splitlines()[0]
     try:
         response = invoke_llm([
             ("system", "你是溫暖幽默的文官學院助理。"),
-            ("human", "請給受訓同學一句 10 至 50 字的學習勉勵，繁體中文為主，附一句簡短英文。只輸出勉勵內容，早安問候與 emoji 由程式加上。"),
+            ("human", f"今天是 {today.isoformat()}，請以「{daily_idea}」為主題，"
+                      "給受訓同學一句 10 至 50 字的學習勉勵，繁體中文為主，"
+                      "附一句簡短英文。只輸出勉勵內容，早安問候與 emoji 由程式加上。"),
         ])
         encouragement = plain_content(response.content)
     except Exception:
         log.warning("MORNING_AI_FAILED_USING_FALLBACK", exc_info=True)
         encouragement = ""
-    if not encouragement:
-        encouragement = "今天先做好一件小事，累積起來就是進步。\nOne step at a time."
-    text = "☀️ 同學們早安！\n" + encouragement + " 💪"
+    text = f"☀️ 同學們早安！\n{today.isoformat()}\n{encouragement or fallback} 💪"
     try:
-        with ApiClient(configuration) as client:
-            MessagingApi(client).broadcast(
-                BroadcastRequest(messages=[TextMessage(text=line_text(text))]),
-                _request_timeout=(3, 15),
-            )
-        log.info("MORNING_BROADCAST_OK")
+        push_text(group_id, text)
+        log.info("MORNING_GROUP_PUSH_OK")
     except Exception:
-        log.exception("MORNING_BROADCAST_FAILED")
+        log.exception("MORNING_GROUP_PUSH_FAILED")
 
 
-# 台灣時間每天 07:35 廣播；需要暫停時可將 ENABLE_MORNING_BROADCAST 設為 false。
+# 保留原有啟停開關。設定指定群組後，才在台灣時間平日 08:00 發送。
 scheduler = None
 if os.environ.get("ENABLE_MORNING_BROADCAST", "true").strip().lower() == "true":
-    from apscheduler.schedulers.background import BackgroundScheduler
-    scheduler = BackgroundScheduler(timezone="Asia/Taipei")
-    scheduler.add_job(send_morning_greeting, "cron", hour=7, minute=35,
-                      max_instances=1, coalesce=True)
-    scheduler.start()
+    morning_group_id = os.environ.get("LINE_MORNING_GROUP_ID", "").strip()
+    if not morning_group_id.startswith("C"):
+        log.warning("MORNING_GROUP_NOT_CONFIGURED: LINE_MORNING_GROUP_ID 須設為 LINE 群組 ID")
+    else:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        scheduler = BackgroundScheduler(timezone="Asia/Taipei")
+        scheduler.add_job(send_morning_greeting, "cron", day_of_week="mon-fri", hour=8, minute=0,
+                          args=(morning_group_id, scheduler.timezone),
+                          max_instances=1, coalesce=True)
+        scheduler.start()
 
 
 if __name__ == "__main__":
