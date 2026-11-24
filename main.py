@@ -56,7 +56,7 @@ llm = ChatNVIDIA(
 log.info("APP_VERSION=2 LLM_CONFIG model=%s timeout_seconds=%s max_tokens=%s",
          LLM_MODEL, LLM_TIMEOUT_SECONDS, LLM_MAX_TOKENS)
 embeddings = NVIDIAEmbeddings(
-    model="nvidia/nemotron-3-embed-1b", nvidia_api_key=nvidia_key,
+    model="nvidia/nemotron-3.5-embed-1b", nvidia_api_key=nvidia_key,
     truncate="END", max_batch_size=16,
 )
 vector_store = None
